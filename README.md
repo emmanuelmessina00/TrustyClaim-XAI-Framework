@@ -127,5 +127,61 @@ L'assenza delle feature dominanti viste nei PDP (come "Danni Gravi" o "Scacchi")
 1. **Overfitting Massivo:** La Random Forest ha memorizzato il bias degli scacchi sul Training Set, ma questa regola si è rivelata inutile (rumore statistico) sui nuovi clienti del Test Set, azzerandone l'importanza.
 2. **Maledizione della Dimensionalità (One-Hot Effect):** L'esplosione delle variabili ad alta cardinalità in centinaia di colonne booleane sparse ha diluito e frammentato il potere decisionale dell'algoritmo (es. il fattore predittivo migliore sposta l'accuratezza solo dello 0,35%). Le feature con importanza negativa (es. `policy_annual_premium`) indicano addirittura che mescolarne i valori *aiuta* il modello a non confondersi.
 
+### 4.3 Spiegabilità Locale: Scomposizione SHAP (Waterfall Plot)
 
+Per comprendere l'esatta catena logica che porta all'approvazione o al rifiuto di una singola pratica assicurativa, è stata implementata l'astrazione dei valori **SHAP (SHapley Additive exPlanations)**. Fondato sulla teoria dei giochi cooperativi, questo approccio scompone la predizione assegnando a ciascuna feature un valore di importanza che riflette il suo contributo specifico alla deviazione rispetto alla previsione media globale.
+
+Il grafico *Waterfall* permette di comprendere in che modo il modello sia giunto a una specifica decisione per un singolo caso in esame, illustrando visivamente il percorso matematico che conduce dal valore atteso globale ($E[f(X)]$) al valore predetto finale ($f(x)$).
+![Waterfall plot](plots/waterfallplot.png)
+
+**Dinamica della Predizione (Istanza #0):**
+
+* **Valore Atteso Globale $E[f(X)]$: 0.239 (23.9%)**
+* **Fattori di Mitigazione (Freni):** L'assenza di un danno grave (`incident_severity_Major Damage = False`) riduce l'output del modello di ben **-0.07**. In aggiunta, la condizione `Total Loss = True` introduce una penalizzazione di ulteriori **-0.06**. L'azione congiunta di queste caratteristiche e delle 157 feature minori aggregate (che sottraggono complessivamente **-0.04**) giustifica il forte abbassamento della stima.
+* **Fattori di Rischio (Acceleratori):** A parziale compensazione del calo, intervengono l'assenza di danni minori (`Minor Damage = False`) e l'occupazione dell'assicurato (`farming-fishing = True`), i quali apportano un incremento marginale di **+0.02** ciascuno, seguiti dal fattore "Nuovo cliente" per specifiche aree geografiche (+0.01).
+* **Previsione Finale $f(x)$:** **0.11 (11%)**
+
+### 4.4 Spiegabilità Globale SHAP: Beeswarm e Scatter Plots
+
+Le inferenze locali SHAP sono state aggregate in proiezioni globali per certificare le tendenze del modello sull'intero dataset e mappare le interazioni tra le variabili.
+
+**Analisi del Beeswarm Plot (Mappatura del Rischio Globale):**
+Il grafico a sciame d'api ordina le variabili in base alla loro importanza globale (magnitudo media assoluta) ed evidenzia la direzione dell'effetto:
+
+* **Driver Logici Validati:** `incident_severity_Major Damage` è la feature dominante. I valori alti (rosso/True) provocano un forte spostamento positivo del rischio (fino a +0.15). Specularmente, `Minor Damage` e `Total Loss` agiscono come forti mitigatori (i valori rossi si concentrano nella porzione sinistra/negativa).
+* **Cristallizzazione del Bias:** Feature comportamentali come `insured_hobbies_chess` e `cross-fit` presentano una forma asimmetrica a "coda lunga" verso destra. La rarità dell'hobby (massa blu sullo zero) nasconde un impatto locale devastante: le rare istanze positive (rosse) si disperdono all'estrema destra, iniettando fino a un **+0.28** di rischio fraudolento totalmente slegato dalle dinamiche del sinistro.
+* **Variabili Finanziarie:** Caratteristiche come `property_claim`, `vehicle_claim` e i premi annuali mostrano una nuvola densa mista attorno allo zero. Pur avendo un'influenza globale diffusa, il loro effetto netto sulle singole decisioni è moderato e privo di picchi polarizzanti.
+
+![Beeswarm plot](plots/beeswarm.png)
+
+**Analisi dello Scatter Plot (Dipendenza e Interazioni Non Lineari):**
+Isolando la feature anomala `insured_hobbies_chess`, emerge un comportamento a "funzione gradino" che rivela dinamiche di interazione complesse:
+
+* Per i non praticanti (x=0) l'impatto è neutro-negativo.
+* Per i praticanti (x=1) il valore SHAP schizza in una fascia positiva compresa tra **+0.15 e +0.28**.
+* **Sensibilità alle Interazioni:** La colorazione dei punti rivela che il modello modula l'effetto dell'hobby a seconda del contesto. Tra i giocatori di scacchi (x=1), i punti blu (assenza di danno grave, `Major Damage = 0`) si collocano nella parte più alta (SHAP > +0.25). Al contrario, i punti rossi (presenza di danno grave) subiscono una mitigazione (+0.15 / +0.18). Il modello, paradossalmente, ritiene massimamente sospetto un cliente scacchista che richiede un risarcimento per un danno non grave.
+
+![Scatter Plot](plots/scatterplot.png)
+
+### 4.5 Confronto Metodologico Locale: LIME (Local Interpretable Model-Agnostic Explanations)
+
+Per garantire la robustezza metodologica dell'auditing ed escludere che le anomalie riscontrate fossero artefatti matematici di un singolo algoritmo, il framework affianca alla scomposizione esatta di SHAP l'approssimazione surrogata di **LIME**.
+
+Mentre SHAP calcola l'attribuzione esatta tramite la teoria dei giochi cooperativi, LIME opera perturbando l'istanza in esame per generare un vicinato sintetico. Su questo intorno spaziale, LIME addestra un modello lineare regolarizzato (Ridge Regression) capace di approssimare localmente il complesso confine decisionale non lineare della Random Forest.
+![LIME Plot](plots/LIME.png)
+
+**Analisi dei Pesi della Regressione Locale (Istanza #0):**
+L'estrazione dei coefficienti lineari ha fornito la seguente gerarchia (estratto della Top 10):
+
+1. `insured_hobbies_chess <= 0.00` | Peso: **-0.2250**
+2. `incident_severity_Major Damage <= 0.00` | Peso: **-0.1951**
+3. `insured_hobbies_cross-fit <= 0.00` | Peso: **-0.1829**
+4. `auto_model_X6 <= 0.00` | Peso: **-0.0398**
+
+**Riscontro e Diagnosi dell'Auditor:**
+L'output del modello surrogato LIME converge parallelamente e in modo schiacciante con la topologia mappata da SHAP, offrendo tre conferme definitive:
+
+1. **Validazione del Bias:** L'assenza degli hobby (Scacchi e Cross-fit) possiede i pesi negativi di massima magnitudo, certificando che l'algoritmo valuta questi attributi spuri con una priorità superiore rispetto all'assenza di un danno grave.
+2. **Sensibilità al Rumore:** La presenza nella Top 10 di feature come i modelli specifici di automobile (`X6`, `C300`, `Silverado`), con coefficienti minimi ma non nulli, corrobora la diagnosi della *maledizione della dimensionalità*. L'approssimazione lineare locale è disturbata dalla frammentazione del One-Hot Encoding.
+3. **Cross-Validation XAI:** L'allineamento tra due paradigmi esplicativi matematicamente indipendenti (esatto vs. approssimato locale) certifica senza ombra di dubbio la necessità di respingere il modello allo stato attuale e procedere con un re-training su uno spazio vettoriale a dimensionalità ridotta e semanticamente purificato.
 
