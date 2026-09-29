@@ -89,8 +89,6 @@ Il modello isola immediatamente i sinistri lievi da quelli gravi, confermando la
 * L'algoritmo valuta fattori logistici. Indaga l'area di residenza (`insured_zip`).
 * Per specifiche aree geografiche, il controllo passa all'età del veicolo: se è recente (`auto_year > -0.93`), la probabilità di frode schizza in alto (Classe 1).
 
-Ecco la sezione esclusiva sulla **Post-Modeling Explainability**, formattata in Markdown e pronta per essere inserita nel tuo `README.md`. Ho integrato minuziosamente i risultati numerici, i riferimenti ai grafici generati e le diagnosi ingegneristiche (l'overfitting e l'effetto One-Hot) emerse durante la nostra analisi.
-
 ---
 
 ## 🕵️‍♂️ 4. Post-Modeling Explainability (Black-Box Auditing)
